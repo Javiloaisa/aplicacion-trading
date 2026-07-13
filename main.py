@@ -10,10 +10,13 @@ El envío del aviso NO vive aquí: run_once/run_loop reciben callbacks
   - main() (este fichero, standalone)  -> solo Telegram.
   - server.py                          -> Telegram + Web Push (PWA) + panel.
 
+Multi-par: vigila TODOS los símbolos de cfg.SYMBOLS en cada ciclo (misma regla en
+cada uno, indicadores y niveles independientes).
+
 Anti-repintado + anti-spam:
   - Solo se evalúa la última vela cerrada (data.drop_unclosed).
-  - Se guarda el open_time de la última vela procesada en STATE_FILE; una vela
-    ya procesada no se re-evalúa ni re-notifica (incluso tras un reinicio).
+  - Se guarda el open_time de la última vela procesada POR SÍMBOLO en STATE_FILE;
+    una vela ya procesada no se re-evalúa ni re-notifica (incluso tras un reinicio).
 
 Uso standalone:
   python main.py            # loop (solo Telegram)
@@ -39,11 +42,11 @@ from notify import Notifier, format_signal
 
 log = logging.getLogger("signal-watcher")
 
-# Firmas de los callbacks:
-#   on_eval(cfg, candle_ts:int, close:float, levels:Levels, ev:Evaluation) -> None
-#   on_signal(cfg, sig:Signal, plan:RiskPlan) -> None
-OnEval   = Callable[[Config, int, float, Levels, Evaluation], None]
-OnSignal = Callable[[Config, Signal, object], None]
+# Firmas de los callbacks (incluyen el símbolo, porque el motor es multi-par):
+#   on_eval(cfg, symbol:str, candle_ts:int, close:float, levels:Levels, ev:Evaluation) -> None
+#   on_signal(cfg, symbol:str, sig:Signal, plan:RiskPlan) -> None
+OnEval   = Callable[[Config, str, int, float, Levels, Evaluation], None]
+OnSignal = Callable[[Config, str, Signal, object], None]
 
 
 # ── Estado persistente ────────────────────────────────────────────────
@@ -62,29 +65,35 @@ def save_state(path: str, state: dict) -> None:
     os.replace(tmp, path)   # escritura atómica
 
 
-# ── Un ciclo ──────────────────────────────────────────────────────────
-def run_once(cfg, state: dict,
+# ── Un ciclo, UN símbolo ──────────────────────────────────────────────
+def run_once(cfg, symbol: str, state: dict,
              on_eval: Optional[OnEval] = None,
              on_signal: Optional[OnSignal] = None) -> bool:
     """
-    Procesa como mucho una vela nueva. Devuelve True si había vela nueva (y por
-    tanto se actualizó el estado), False si no había nada nuevo.
+    Procesa como mucho una vela nueva de `symbol`. Devuelve True si había vela nueva
+    (y por tanto se actualizó el estado), False si no había nada nuevo.
+
+    El estado es por símbolo: state["last_ts"][symbol] = open_time de la última vela
+    procesada, para no re-evaluar ni re-notificar la misma vela (ni tras un reinicio).
     """
-    df = kdata.fetch_klines(cfg.SYMBOL, cfg.TIMEFRAME, cfg.KLINES_LIMIT, cfg.BASE_URL)
+    last_ts = state.setdefault("last_ts", {})
+
+    df = kdata.fetch_klines(symbol, cfg.TIMEFRAME, cfg.KLINES_LIMIT, cfg.BASE_URL)
     df = kdata.drop_unclosed(df, cfg.TIMEFRAME)
 
     min_rows = max(cfg.SWING_N, cfg.MACD_SLOW + cfg.MACD_SIGNAL, cfg.RSI_PERIOD) + 2
     if len(df) < min_rows:
-        log.warning("Pocas velas cerradas (%d < %d); espero al siguiente ciclo", len(df), min_rows)
+        log.warning("[%s] Pocas velas cerradas (%d < %d); espero al siguiente ciclo",
+                    symbol, len(df), min_rows)
         return False
 
     candle_ts = kdata.last_closed_ts(df)
-    if state.get("last_candle_ts") == candle_ts:
+    if last_ts.get(symbol) == candle_ts:
         return False   # esta vela ya se procesó (nada nuevo)
 
     df = add_indicators(df, cfg)
     if not has_warmup(df):
-        log.warning("Indicadores con NaN en las últimas velas; espero más historia")
+        log.warning("[%s] Indicadores con NaN en las últimas velas; espero más historia", symbol)
         return False
 
     levels = swing_levels(df, cfg.SWING_N)
@@ -96,16 +105,16 @@ def run_once(cfg, state: dict,
     verdict = f"→ FIRED {fired.direction.upper()}" if fired else "→ sin señal"
     log.info(
         "[%s UTC] %s %s close=%.2f | res=%.2f sop=%.2f | LONG %s | SHORT %s %s",
-        when, cfg.SYMBOL, cfg.TIMEFRAME, close,
+        when, symbol, cfg.TIMEFRAME, close,
         levels.resistance, levels.support,
         ev.long.conditions.as_marks(), ev.short.conditions.as_marks(), verdict,
     )
 
     if on_eval:
         try:
-            on_eval(cfg, candle_ts, close, levels, ev)
+            on_eval(cfg, symbol, candle_ts, close, levels, ev)
         except Exception as e:  # noqa: BLE001 - un fallo de panel no debe cortar el loop
-            log.exception("on_eval falló: %s", e)
+            log.exception("on_eval falló (%s): %s", symbol, e)
 
     if fired:
         try:
@@ -116,20 +125,34 @@ def run_once(cfg, state: dict,
                 stop_buffer_pct=cfg.STOP_BUFFER_PCT,
             )
         except ValueError as e:
-            log.error("Señal %s no dimensionable (%s); no se notifica", fired.direction, e)
+            log.error("[%s] Señal %s no dimensionable (%s); no se notifica",
+                      symbol, fired.direction, e)
             plan = None
         if plan is not None:
-            log.info("SEÑAL %s — entrada=%.2f stop=%.2f size=%.6f BTC margen=%.2f USDT",
-                     fired.direction.upper(), plan.entry, plan.stop, plan.size_btc, plan.margin_usdt)
+            log.info("SEÑAL %s %s — entrada=%.2f stop=%.2f size=%.6f margen=%.2f USDT",
+                     symbol, fired.direction.upper(), plan.entry, plan.stop,
+                     plan.size_base, plan.margin_usdt)
             if on_signal:
                 try:
-                    on_signal(cfg, fired, plan)
+                    on_signal(cfg, symbol, fired, plan)
                 except Exception as e:  # noqa: BLE001
-                    log.exception("on_signal falló: %s", e)
+                    log.exception("on_signal falló (%s): %s", symbol, e)
 
-    state["last_candle_ts"] = candle_ts
+    last_ts[symbol] = candle_ts
     save_state(cfg.STATE_FILE, state)
     return True
+
+
+# ── Un ciclo, TODOS los símbolos ──────────────────────────────────────
+def run_cycle(cfg, state: dict,
+              on_eval: Optional[OnEval] = None,
+              on_signal: Optional[OnSignal] = None) -> None:
+    """Recorre cfg.SYMBOLS. Un fallo en un símbolo no afecta a los demás."""
+    for symbol in cfg.SYMBOLS:
+        try:
+            run_once(cfg, symbol, state, on_eval=on_eval, on_signal=on_signal)
+        except Exception as e:  # noqa: BLE001 - aislar el fallo por símbolo
+            log.exception("[%s] Error en el ciclo: %s", symbol, e)
 
 
 def run_loop(cfg, state: dict,
@@ -139,12 +162,13 @@ def run_loop(cfg, state: dict,
     """Loop infinito. Nunca muere por un fallo puntual. `stop_event` (threading.Event)
     permite pararlo limpiamente si se usa desde el servidor."""
     log.info(
-        "vigilancia activa | %s %s | poll=%ds | riesgo=%g USDT | lev=%dx",
-        cfg.SYMBOL, cfg.TIMEFRAME, cfg.POLL_INTERVAL_SEC, cfg.RISK_USDT, cfg.LEVERAGE,
+        "vigilancia activa | %d símbolos: %s | %s | poll=%ds | riesgo=%g USDT | lev=%dx",
+        len(cfg.SYMBOLS), ", ".join(cfg.SYMBOLS), cfg.TIMEFRAME,
+        cfg.POLL_INTERVAL_SEC, cfg.RISK_USDT, cfg.LEVERAGE,
     )
     while stop_event is None or not stop_event.is_set():
         try:
-            run_once(cfg, state, on_eval=on_eval, on_signal=on_signal)
+            run_cycle(cfg, state, on_eval=on_eval, on_signal=on_signal)
         except Exception as e:  # noqa: BLE001 - el loop nunca debe morir
             log.exception("Error en el ciclo: %s", e)
         # sleep interrumpible
@@ -178,16 +202,17 @@ def main() -> None:
     notifier = Notifier(cfg.TELEGRAM_TOKEN, cfg.TELEGRAM_CHAT_ID, enabled=not dry)
     state = load_state(cfg.STATE_FILE)
 
-    def on_signal(cfg, sig: Signal, plan) -> None:
-        notifier.send(format_signal(sig, plan, cfg))
+    def on_signal(cfg, symbol: str, sig: Signal, plan) -> None:
+        notifier.send(format_signal(symbol, sig, plan, cfg))
 
     log.info(
-        "signal-watcher (standalone) | telegram=%s%s",
-        "on" if cfg.telegram_enabled() else "off", " (DRY-RUN)" if dry else "",
+        "signal-watcher (standalone) | %d símbolos | telegram=%s%s",
+        len(cfg.SYMBOLS), "on" if cfg.telegram_enabled() else "off",
+        " (DRY-RUN)" if dry else "",
     )
 
     if once:
-        run_once(cfg, state, on_signal=on_signal)
+        run_cycle(cfg, state, on_signal=on_signal)
         return
     run_loop(cfg, state, on_signal=on_signal)
 

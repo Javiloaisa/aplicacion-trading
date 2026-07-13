@@ -4,8 +4,9 @@ signal-watcher — servidor de la PWA + Web Push.
 Un solo proceso:
   - Sirve la PWA (static/) y su manifest/service-worker.
   - Gestiona las suscripciones de notificaciones (/api/subscribe).
-  - Corre el motor de vigilancia (main.run_loop) en un hilo de fondo.
-  - Cuando una señal dispara -> Telegram + Web Push (a todos los móviles) + panel.
+  - Corre el motor de vigilancia (main.run_loop) en un hilo de fondo, MULTI-PAR.
+  - Cuando una señal dispara -> Web Push (a todos los móviles) + panel.
+    (Sin Telegram: los avisos van SOLO al móvil por Web Push.)
 
 Arranque:  python server.py
 Local (para probar sin HTTPS):  abre http://localhost:8095 en Chrome de escritorio
@@ -21,7 +22,7 @@ from flask import Flask, jsonify, request, send_from_directory
 
 from config import Config
 import main as engine
-from notify import Notifier, format_signal
+from notify import base_asset
 from webpush import PushManager
 from store import SignalStore
 
@@ -32,10 +33,10 @@ STATIC_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
 app = Flask(__name__, static_folder=STATIC_DIR, static_url_path="/static")
 
 # ── Componentes compartidos ───────────────────────────────────────────
+# Avisos SOLO al móvil (Web Push). No hay Telegram.
 _dry = os.getenv("DRY_RUN", "").lower() in ("1", "true", "yes")
 push = PushManager(Config)
 store = SignalStore(Config.SIGNALS_FILE)
-notifier = Notifier(Config.TELEGRAM_TOKEN, Config.TELEGRAM_CHAT_ID, enabled=not _dry)
 
 _watcher_started = False
 _watcher_lock = threading.Lock()
@@ -46,17 +47,18 @@ def _iso(ts_ms: int) -> str:
     return datetime.fromtimestamp(ts_ms / 1000, timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
 
 
-def _signal_record(cfg, sig, plan) -> dict:
+def _signal_record(cfg, symbol, sig, plan) -> dict:
     return {
         "ts": sig.candle_ts,
         "time_utc": _iso(sig.candle_ts),
-        "symbol": cfg.SYMBOL,
+        "symbol": symbol,
+        "base": base_asset(symbol),
         "timeframe": cfg.TIMEFRAME,
         "direction": sig.direction,
         "entry": round(plan.entry, 2),
         "stop": round(plan.stop, 2),
         "risk_points": round(plan.risk_points, 2),
-        "size_btc": round(plan.size_btc, 6),
+        "size_base": round(plan.size_base, 6),
         "notional_usdt": round(plan.notional_usdt, 2),
         "margin_usdt": round(plan.margin_usdt, 2),
         "leverage": plan.leverage,
@@ -72,7 +74,7 @@ def _signal_record(cfg, sig, plan) -> dict:
 def _push_payload(rec: dict) -> dict:
     icon = "📈" if rec["direction"] == "long" else "📉"
     body = (f"Entrada {rec['entry']:,.2f} · Stop {rec['stop']:,.2f} · "
-            f"{rec['size_btc']:.6f} BTC · TP1 {rec['tps'][0]:,.2f}")
+            f"{rec['size_base']:.6f} {rec['base']} · TP1 {rec['tps'][0]:,.2f}")
     return {
         "title": f"{icon} SEÑAL {rec['direction'].upper()} — {rec['symbol']} ({rec['timeframe']})",
         "body": body,
@@ -82,11 +84,12 @@ def _push_payload(rec: dict) -> dict:
 
 
 # ── Callbacks del motor ───────────────────────────────────────────────
-def on_eval(cfg, candle_ts, close, levels, ev) -> None:
-    store.set_eval({
+def on_eval(cfg, symbol, candle_ts, close, levels, ev) -> None:
+    store.set_eval(symbol, {
         "ts": candle_ts,
         "time_utc": _iso(candle_ts),
-        "symbol": cfg.SYMBOL,
+        "symbol": symbol,
+        "base": base_asset(symbol),
         "timeframe": cfg.TIMEFRAME,
         "close": round(close, 2),
         "resistance": round(levels.resistance, 2),
@@ -99,12 +102,10 @@ def on_eval(cfg, candle_ts, close, levels, ev) -> None:
     })
 
 
-def on_signal(cfg, sig, plan) -> None:
-    rec = _signal_record(cfg, sig, plan)
+def on_signal(cfg, symbol, sig, plan) -> None:
+    rec = _signal_record(cfg, symbol, sig, plan)
     store.add_signal(rec)
-    # Telegram (si está configurado)
-    notifier.send(format_signal(sig, plan, cfg))
-    # Web Push a los móviles (PWA)
+    # Web Push a los móviles (PWA) — único canal de aviso.
     if cfg.PUSH_ENABLED:
         push.send_to_all(_push_payload(rec))
 
@@ -153,7 +154,7 @@ def manifest():
 def api_config():
     return jsonify({
         "appName": Config.APP_NAME,
-        "symbol": Config.SYMBOL,
+        "symbols": Config.SYMBOLS,
         "timeframe": Config.TIMEFRAME,
         "applicationServerKey": push.application_server_key,
         "pushEnabled": Config.PUSH_ENABLED,
@@ -183,10 +184,9 @@ def api_status():
     snap = store.snapshot()
     return jsonify({
         "appName": Config.APP_NAME,
-        "symbol": Config.SYMBOL,
+        "symbols": Config.SYMBOLS,
         "timeframe": Config.TIMEFRAME,
         "subscriptions": push.count(),
-        "telegram": Config.telegram_enabled(),
         "pushEnabled": Config.PUSH_ENABLED,
         **snap,
     })
@@ -206,10 +206,10 @@ def api_test():
 # ── Arranque ──────────────────────────────────────────────────────────
 def _serve() -> None:
     engine.setup_logging()
-    log.info("%s | http://%s:%d | símbolo=%s %s | push=%s telegram=%s%s",
-             Config.APP_NAME, Config.WEB_HOST, Config.WEB_PORT, Config.SYMBOL, Config.TIMEFRAME,
+    log.info("%s | http://%s:%d | %d símbolos (%s) %s | push=%s%s",
+             Config.APP_NAME, Config.WEB_HOST, Config.WEB_PORT,
+             len(Config.SYMBOLS), ", ".join(Config.SYMBOLS), Config.TIMEFRAME,
              "on" if Config.PUSH_ENABLED else "off",
-             "on" if Config.telegram_enabled() else "off",
              " (DRY-RUN)" if _dry else "")
     start_watcher()
     try:

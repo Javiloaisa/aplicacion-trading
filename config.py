@@ -24,10 +24,24 @@ def _b(name: str, default: bool) -> bool:
     return os.getenv(name, str(default)).strip().lower() in ("1", "true", "yes", "on")
 
 
+def _list(name: str, default: str) -> list[str]:
+    """Lee una lista separada por comas de env; normaliza a MAYÚSCULAS y sin vacíos."""
+    raw = os.getenv(name, default)
+    return [s.strip().upper() for s in raw.split(",") if s.strip()]
+
+
+# Las 10 cripto más fuertes por capitalización con futuros USDT en Bitunix
+# (verificadas contra el endpoint de klines). Ajustable con la env var SYMBOLS.
+DEFAULT_SYMBOLS = "BTCUSDT,ETHUSDT,BNBUSDT,SOLUSDT,XRPUSDT,DOGEUSDT,ADAUSDT,TRXUSDT,AVAXUSDT,LINKUSDT"
+
+
 class Config:
     # ── Fuente de datos ────────────────────────────────────────
     BASE_URL      = os.getenv("BITUNIX_BASE_URL", "https://fapi.bitunix.com")
-    SYMBOL        = os.getenv("SYMBOL", "BTCUSDT")
+    # Multi-par: vigila varias cripto a la vez (misma regla en cada una).
+    SYMBOLS       = _list("SYMBOLS", DEFAULT_SYMBOLS)
+    # Compat: algunos sitios muestran "el símbolo"; usamos el primero de la lista.
+    SYMBOL        = (os.getenv("SYMBOL") or (SYMBOLS[0] if SYMBOLS else "BTCUSDT")).upper()
     TIMEFRAME     = os.getenv("TIMEFRAME", "1h")          # interval de Bitunix ("1h", "15m"…)
     KLINES_LIMIT  = _i("KLINES_LIMIT", 200)               # velas a bajar (warmup MACD + swing)
     POLL_INTERVAL_SEC = _i("POLL_INTERVAL_SEC", 60)       # cada cuánto sondea

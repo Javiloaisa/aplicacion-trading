@@ -1,7 +1,7 @@
 {
-  "name": "Signal Watcher",
+  "name": "Crypto Signals",
   "short_name": "Signals",
-  "description": "Avisos de confluencia RSI + MACD + nivel sobre BTCUSDT (Bitunix).",
+  "description": "Avisos de confluencia RSI + MACD + nivel sobre las 10 cripto más fuertes (Bitunix).",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",

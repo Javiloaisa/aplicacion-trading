@@ -42,8 +42,17 @@ def _fmt_px(x: float) -> str:
     return f"{x:,.2f}"
 
 
-def format_signal(sig: Signal, plan: RiskPlan, cfg) -> str:
+def base_asset(symbol: str) -> str:
+    """'BTCUSDT' -> 'BTC', 'ETHUSDT' -> 'ETH'. Fallback: el propio símbolo."""
+    for quote in ("USDT", "USDC", "USD"):
+        if symbol.upper().endswith(quote):
+            return symbol[: -len(quote)]
+    return symbol
+
+
+def format_signal(symbol: str, sig: Signal, plan: RiskPlan, cfg) -> str:
     icon = "📈" if sig.direction == "long" else "📉"
+    asset = base_asset(symbol)
     when = datetime.fromtimestamp(sig.candle_ts / 1000, timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
 
     if sig.direction == "long":
@@ -59,14 +68,14 @@ def format_signal(sig: Signal, plan: RiskPlan, cfg) -> str:
 
     tp1, tp2, tp3 = plan.tps
     lines = [
-        f"{icon} <b>SEÑAL {sig.direction.upper()} — {cfg.SYMBOL} ({cfg.TIMEFRAME})</b>",
+        f"{icon} <b>SEÑAL {sig.direction.upper()} — {symbol} ({cfg.TIMEFRAME})</b>",
         f"Vela cerrada: {when}",
         "",
         f"Entrada:  <b>{_fmt_px(plan.entry)}</b>",
         f"Stop:     {_fmt_px(plan.stop)}  ({stop_note})",
         f"1R:       {plan.risk_points:,.2f} pts",
         "",
-        f"Tamaño:   <b>{plan.size_btc:.6f} BTC</b>   (riesgo {plan.risk_usdt:g} USDT)",
+        f"Tamaño:   <b>{plan.size_base:.6f} {asset}</b>   (riesgo {plan.risk_usdt:g} USDT)",
         f"Margen:   {plan.margin_usdt:,.2f} USDT   ({plan.leverage}x — el apalancamiento NO cambia el riesgo)",
         "",
         f"TP1 (1R): {_fmt_px(tp1)}",
