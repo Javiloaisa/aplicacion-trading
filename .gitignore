@@ -1,0 +1,13 @@
+# Secretos y estado en runtime — NO subir
+.env
+vapid_private.pem
+subscriptions.json
+signals.json
+state.json
+state.json.tmp
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
