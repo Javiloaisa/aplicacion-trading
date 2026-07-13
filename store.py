@@ -1,6 +1,7 @@
 """
 Almacén ligero para el panel de la PWA: últimas señales disparadas y el estado
-de la última evaluación (las 3 condiciones), en memoria + persistido a JSON.
+de la última evaluación (las 3 condiciones) POR SÍMBOLO, en memoria + persistido
+a JSON.
 
 No es la fuente de verdad del anti-spam (eso es state.json); esto es solo para
 que la app pueda MOSTRAR qué está pasando.
@@ -13,11 +14,12 @@ from collections import deque
 
 
 class SignalStore:
-    def __init__(self, path: str, maxlen: int = 50):
+    def __init__(self, path: str, maxlen: int = 100):
         self.path = path
         self._lock = threading.Lock()
         self.signals: deque = deque(maxlen=maxlen)
-        self.last_eval: dict | None = None
+        # Última evaluación por símbolo: {"BTCUSDT": {...}, "ETHUSDT": {...}, …}
+        self.last_eval: dict = {}
         self._load()
 
     def _load(self) -> None:
@@ -26,7 +28,13 @@ class SignalStore:
                 data = json.load(f)
             for s in data.get("signals", []):
                 self.signals.append(s)
-            self.last_eval = data.get("last_eval")
+            ev = data.get("last_eval")
+            # Compat: formato antiguo (una sola evaluación, no dict por símbolo).
+            if isinstance(ev, dict) and ("long" in ev or "short" in ev):
+                sym = ev.get("symbol")
+                self.last_eval = {sym: ev} if sym else {}
+            elif isinstance(ev, dict):
+                self.last_eval = ev
         except (FileNotFoundError, json.JSONDecodeError):
             pass
 
@@ -41,9 +49,9 @@ class SignalStore:
             self.signals.appendleft(signal)
             self._save()
 
-    def set_eval(self, evaluation: dict) -> None:
+    def set_eval(self, symbol: str, evaluation: dict) -> None:
         with self._lock:
-            self.last_eval = evaluation
+            self.last_eval[symbol] = evaluation
             self._save()
 
     def snapshot(self) -> dict:

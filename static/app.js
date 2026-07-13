@@ -20,7 +20,8 @@ async function boot() {
   try {
     CONFIG = await (await fetch('/api/config')).json();
     $('app-name').textContent = CONFIG.appName || 'Signal Watcher';
-    $('pair').textContent = `${CONFIG.symbol} · ${CONFIG.timeframe}`;
+    const syms = CONFIG.symbols || [];
+    $('pair').textContent = `${syms.length} cripto · ${CONFIG.timeframe}`;
   } catch (e) { /* seguimos: el panel puede fallar sin romper la UI */ }
 
   if (!('serviceWorker' in navigator) || !('PushManager' in window)) {
@@ -94,26 +95,35 @@ async function refreshStatus() {
   try { s = await (await fetch('/api/status')).json(); } catch (e) { return; }
   $('live-dot').classList.add('on');
 
-  // Última evaluación
-  const ev = s.last_eval;
-  if (ev) {
-    $('eval').innerHTML = `
-      <div class="row"><span class="k">Vela</span><span class="v">${ev.time_utc}</span></div>
-      <div class="row"><span class="k">Cierre</span><span class="v">${fmt(ev.close)}</span></div>
-      <div class="row"><span class="k">Resistencia / Soporte</span><span class="v">${fmt(ev.resistance)} / ${fmt(ev.support)}</span></div>
-      <div class="conds">
-        <span class="cond"><b>LONG</b> RSI ${mark(ev.long.rsi)} MACD ${mark(ev.long.macd)} Precio ${mark(ev.long.price)}</span>
-      </div>
-      <div class="conds">
-        <span class="cond"><b>SHORT</b> RSI ${mark(ev.short.rsi)} MACD ${mark(ev.short.macd)} Precio ${mark(ev.short.price)}</span>
-      </div>`;
+  // Última evaluación POR SÍMBOLO (dict {symbol: eval})
+  const evals = s.last_eval || {};
+  const order = (CONFIG && CONFIG.symbols) || Object.keys(evals);
+  const rows = order.filter((sym) => evals[sym]).map((sym) => renderEval(evals[sym]));
+  if (rows.length) {
+    $('eval').innerHTML = rows.join('');
   }
 
-  // Señales
+  // Señales (de cualquier símbolo, más recientes primero)
   const list = s.signals || [];
   if (list.length) {
     $('signals').innerHTML = list.map(renderSignal).join('');
   }
+}
+
+function renderEval(ev) {
+  const asset = ev.base || ev.symbol;
+  return `
+    <div class="sig">
+      <div class="top">
+        <span><b>${asset}</b></span>
+        ${ev.fired ? `<span class="dir ${ev.fired}">${ev.fired.toUpperCase()}</span>` : ''}
+        <span class="when">${fmt(ev.close)}</span>
+      </div>
+      <div class="conds">
+        <span class="cond"><b>L</b> RSI ${mark(ev.long.rsi)} MACD ${mark(ev.long.macd)} Px ${mark(ev.long.price)}</span>
+        <span class="cond"><b>S</b> RSI ${mark(ev.short.rsi)} MACD ${mark(ev.short.macd)} Px ${mark(ev.short.price)}</span>
+      </div>
+    </div>`;
 }
 
 function renderSignal(x) {
@@ -127,7 +137,7 @@ function renderSignal(x) {
       </div>
       <div class="grid">
         <div>Entrada <b>${fmt(x.entry)}</b></div><div>Stop ${fmt(x.stop)}</div>
-        <div>Tamaño ${x.size_btc} BTC</div><div>Margen ${fmt(x.margin_usdt)} USDT</div>
+        <div>Tamaño ${x.size_base} ${x.base || ''}</div><div>Margen ${fmt(x.margin_usdt)} USDT</div>
         <div>1R ${fmt(x.risk_points)}</div><div>TP ${x.tps.map(fmt).join(' / ')}</div>
       </div>
     </div>`;

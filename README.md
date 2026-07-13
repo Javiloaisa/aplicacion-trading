@@ -1,12 +1,18 @@
-# signal-watcher
+# crypto-signals (signal-watcher)
 
-Servicio de **aviso** (no de ejecución) que vigila **BTCUSDT en Bitunix**, evalúa
-una regla de **confluencia de 3 condiciones** (RSI + MACD + nivel de precio) sobre
-**velas cerradas**, y avisa por **Telegram** y/o por **Web Push a una PWA instalable
-en el móvil** cuando se cumplen las 3 a la vez, incluyendo tamaño de posición y
-niveles R.
+Servicio de **aviso** (no de ejecución) que vigila **las 10 cripto más fuertes en
+Bitunix** (BTC, ETH, BNB, SOL, XRP, DOGE, ADA, TRX, AVAX, LINK — configurable),
+evalúa en cada una una regla de **confluencia de 3 condiciones** (RSI + MACD +
+nivel de precio) sobre **velas cerradas**, y avisa por **Web Push a una PWA
+instalable en el móvil** cuando se cumplen las 3 a la vez, incluyendo tamaño de
+posición y niveles R.
 
 > **No pone órdenes. Solo detecta y notifica.**
+> **Los avisos van SOLO al móvil (Web Push). No usa Telegram.**
+
+La lista de pares se controla con la env var `SYMBOLS` (separada por comas). El
+motor evalúa cada símbolo de forma independiente en cada ciclo, con indicadores,
+niveles y estado anti-repintado propios por par.
 
 ---
 
@@ -80,8 +86,8 @@ No se confía en indicadores del exchange.
 | [`levels.py`](levels.py) | Soporte/resistencia (swing high/low). |
 | [`rules.py`](rules.py) | Evalúa las 3 condiciones → objeto `Signal` estructurado. |
 | [`sizing.py`](sizing.py) | Lógica R. |
-| [`notify.py`](notify.py) | Telegram + formato del mensaje. |
-| [`main.py`](main.py) | Loop de sondeo + estado (fan-out por callbacks). |
+| [`notify.py`](notify.py) | Formato del mensaje (+ Telegram opcional solo en modo standalone). |
+| [`main.py`](main.py) | Loop de sondeo multi-par + estado por símbolo (fan-out por callbacks). |
 | [`server.py`](server.py) | **Servidor de la PWA + Web Push**; corre el loop en un hilo. |
 | [`webpush.py`](webpush.py) | Claves VAPID + suscripciones + envío de push. |
 | [`store.py`](store.py) | Últimas señales + última evaluación (para el panel). |
@@ -102,11 +108,11 @@ pip install -r requirements.txt
 cp .env.example .env        # rellena TELEGRAM_TOKEN/CHAT_ID (opcional) y VAPID_SUBJECT
 python make_icons.py        # genera los iconos de la PWA (una vez)
 
-# Opción A — servidor con PWA + Web Push + loop (recomendado):
+# Opción A — servidor con PWA + Web Push + loop (recomendado, sin Telegram):
 python server.py            # sirve en http://localhost:8095
 
-# Opción B — solo motor + Telegram, sin PWA:
-python main.py --once --dry-run   # un ciclo, sin enviar (para probar)
+# Opción B — solo motor por consola (Telegram opcional si rellenas el .env), sin PWA:
+python main.py --once --dry-run   # un ciclo sobre los 10 pares, sin enviar (para probar)
 python main.py                    # loop
 ```
 
@@ -184,7 +190,7 @@ para el HTTPS. Para modo solo-Telegram sin PWA, cambia el `ExecStart` a `main.py
 
 - **Divergencias RSI** (4ª condición): interfaz lista en `rules.py`, sin implementar.
 - **Ejecución de órdenes**.
-- **Multi-par / multi-timeframe**.
+- **Multi-timeframe** (multi-par ya implementado vía `SYMBOLS`).
 
 ---
 

@@ -7,8 +7,9 @@ niveles y tamaño para mostrarlos, no coloca ninguna orden.
                        long  -> bajo el SOPORTE swing:  support  * (1 - buffer)
                        short -> sobre la RESISTENCIA:    resistance * (1 + buffer)
   - Riesgo (1R)    = abs(entrada - stop)              [en puntos de precio]
-  - Tamaño (BTC)   = riesgo_usdt / riesgo_puntos      [el apalancamiento NO
-                     cambia el riesgo, solo el margen]
+  - Tamaño (base)  = riesgo_usdt / riesgo_puntos      [en unidades de la moneda:
+                     BTC, ETH, SOL…; el apalancamiento NO cambia el riesgo, solo
+                     el margen]
   - Margen bloq.   = (tamaño * entrada) / apalancamiento
   - TP 1R/2R/3R    = entrada ± riesgo_puntos * R según dirección
   - Break-even     = entrada (recordatorio: subir el stop aquí en +1R)
@@ -26,10 +27,10 @@ class RiskPlan:
     stop: float
     level_broken: float     # el nivel de swing que se rompió (soporte usado en long / resist. en short)
     risk_points: float      # 1R en puntos de precio = abs(entrada - stop)
-    size_btc: float         # riesgo_usdt / risk_points
+    size_base: float        # riesgo_usdt / risk_points, en unidades de la moneda base
     risk_usdt: float
     leverage: int
-    notional_usdt: float    # size_btc * entry
+    notional_usdt: float    # size_base * entry
     margin_usdt: float      # notional / leverage
     tps: list[float]        # [1R, 2R, 3R]
     breakeven: float        # = entry
@@ -53,8 +54,8 @@ def build_plan(sig: Signal, *, risk_usdt: float, leverage: int,
     if risk_points <= 0:
         raise ValueError(f"risk_points no positivo (entry={entry}, stop={stop})")
 
-    size_btc = risk_usdt / risk_points
-    notional = size_btc * entry
+    size_base = risk_usdt / risk_points
+    notional = size_base * entry
     margin = notional / leverage
     tps = [entry + sign * risk_points * r for r in (1, 2, 3)]
 
@@ -64,7 +65,7 @@ def build_plan(sig: Signal, *, risk_usdt: float, leverage: int,
         stop=stop,
         level_broken=level,
         risk_points=risk_points,
-        size_btc=size_btc,
+        size_base=size_base,
         risk_usdt=risk_usdt,
         leverage=leverage,
         notional_usdt=notional,
