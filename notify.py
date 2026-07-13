@@ -50,7 +50,7 @@ def base_asset(symbol: str) -> str:
     return symbol
 
 
-def format_signal(symbol: str, sig: Signal, plan: RiskPlan, cfg) -> str:
+def format_signal(symbol: str, timeframe: str, sig: Signal, plan: RiskPlan, cfg) -> str:
     icon = "📈" if sig.direction == "long" else "📉"
     asset = base_asset(symbol)
     when = datetime.fromtimestamp(sig.candle_ts / 1000, timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
@@ -68,7 +68,7 @@ def format_signal(symbol: str, sig: Signal, plan: RiskPlan, cfg) -> str:
 
     tp1, tp2, tp3 = plan.tps
     lines = [
-        f"{icon} <b>SEÑAL {sig.direction.upper()} — {symbol} ({cfg.TIMEFRAME})</b>",
+        f"{icon} <b>SEÑAL {sig.direction.upper()} — {symbol} ({timeframe})</b>",
         f"Vela cerrada: {when}",
         "",
         f"Entrada:  <b>{_fmt_px(plan.entry)}</b>",

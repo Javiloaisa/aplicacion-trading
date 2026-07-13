@@ -47,13 +47,13 @@ def _iso(ts_ms: int) -> str:
     return datetime.fromtimestamp(ts_ms / 1000, timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
 
 
-def _signal_record(cfg, symbol, sig, plan) -> dict:
+def _signal_record(cfg, symbol, timeframe, sig, plan) -> dict:
     return {
         "ts": sig.candle_ts,
         "time_utc": _iso(sig.candle_ts),
         "symbol": symbol,
         "base": base_asset(symbol),
-        "timeframe": cfg.TIMEFRAME,
+        "timeframe": timeframe,
         "direction": sig.direction,
         "entry": round(plan.entry, 2),
         "stop": round(plan.stop, 2),
@@ -84,13 +84,13 @@ def _push_payload(rec: dict) -> dict:
 
 
 # ── Callbacks del motor ───────────────────────────────────────────────
-def on_eval(cfg, symbol, candle_ts, close, levels, ev) -> None:
-    store.set_eval(symbol, {
+def on_eval(cfg, symbol, timeframe, candle_ts, close, levels, ev) -> None:
+    store.set_eval(f"{symbol}@{timeframe}", {
         "ts": candle_ts,
         "time_utc": _iso(candle_ts),
         "symbol": symbol,
         "base": base_asset(symbol),
-        "timeframe": cfg.TIMEFRAME,
+        "timeframe": timeframe,
         "close": round(close, 2),
         "resistance": round(levels.resistance, 2),
         "support": round(levels.support, 2),
@@ -102,8 +102,8 @@ def on_eval(cfg, symbol, candle_ts, close, levels, ev) -> None:
     })
 
 
-def on_signal(cfg, symbol, sig, plan) -> None:
-    rec = _signal_record(cfg, symbol, sig, plan)
+def on_signal(cfg, symbol, timeframe, sig, plan) -> None:
+    rec = _signal_record(cfg, symbol, timeframe, sig, plan)
     store.add_signal(rec)
     # Web Push a los móviles (PWA) — único canal de aviso.
     if cfg.PUSH_ENABLED:
@@ -155,7 +155,7 @@ def api_config():
     return jsonify({
         "appName": Config.APP_NAME,
         "symbols": Config.SYMBOLS,
-        "timeframe": Config.TIMEFRAME,
+        "timeframes": Config.TIMEFRAMES,
         "applicationServerKey": push.application_server_key,
         "pushEnabled": Config.PUSH_ENABLED,
     })
@@ -185,7 +185,7 @@ def api_status():
     return jsonify({
         "appName": Config.APP_NAME,
         "symbols": Config.SYMBOLS,
-        "timeframe": Config.TIMEFRAME,
+        "timeframes": Config.TIMEFRAMES,
         "subscriptions": push.count(),
         "pushEnabled": Config.PUSH_ENABLED,
         **snap,
@@ -206,9 +206,9 @@ def api_test():
 # ── Arranque ──────────────────────────────────────────────────────────
 def _serve() -> None:
     engine.setup_logging()
-    log.info("%s | http://%s:%d | %d símbolos (%s) %s | push=%s%s",
+    log.info("%s | http://%s:%d | %d símbolos (%s) × tf [%s] | push=%s%s",
              Config.APP_NAME, Config.WEB_HOST, Config.WEB_PORT,
-             len(Config.SYMBOLS), ", ".join(Config.SYMBOLS), Config.TIMEFRAME,
+             len(Config.SYMBOLS), ", ".join(Config.SYMBOLS), ", ".join(Config.TIMEFRAMES),
              "on" if Config.PUSH_ENABLED else "off",
              " (DRY-RUN)" if _dry else "")
     start_watcher()

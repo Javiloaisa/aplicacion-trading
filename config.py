@@ -42,7 +42,11 @@ class Config:
     SYMBOLS       = _list("SYMBOLS", DEFAULT_SYMBOLS)
     # Compat: algunos sitios muestran "el símbolo"; usamos el primero de la lista.
     SYMBOL        = (os.getenv("SYMBOL") or (SYMBOLS[0] if SYMBOLS else "BTCUSDT")).upper()
-    TIMEFRAME     = os.getenv("TIMEFRAME", "1h")          # interval de Bitunix ("1h", "15m"…)
+    # Multi-timeframe: cada símbolo se evalúa en TODAS estas temporalidades.
+    # Bitunix espera el intervalo en MINÚSCULAS ("1h", "4h", "15m"): lo forzamos.
+    TIMEFRAMES    = [t.lower() for t in _list("TIMEFRAMES", os.getenv("TIMEFRAME", "1h,4h"))]
+    # Compat: "la" temporalidad (la primera) para sitios que aún esperan una sola.
+    TIMEFRAME     = TIMEFRAMES[0] if TIMEFRAMES else "1h"
     KLINES_LIMIT  = _i("KLINES_LIMIT", 200)               # velas a bajar (warmup MACD + swing)
     POLL_INTERVAL_SEC = _i("POLL_INTERVAL_SEC", 60)       # cada cuánto sondea
 
