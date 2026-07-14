@@ -39,9 +39,10 @@ def add_indicators(df: pd.DataFrame, cfg) -> pd.DataFrame:
     return out
 
 
-def has_warmup(df: pd.DataFrame) -> bool:
-    """True si las dos últimas velas tienen indicadores válidos (no NaN)."""
-    if len(df) < 2:
+def has_warmup(df: pd.DataFrame, rows: int = 2) -> bool:
+    """True si las últimas `rows` velas tienen indicadores válidos (no NaN).
+    `rows` debe cubrir la ventana de confluencia (CONFLUENCE_WINDOW + 1)."""
+    if len(df) < rows:
         return False
     cols = ["rsi", "macd", "macd_signal", "macd_hist"]
-    return not df[cols].iloc[-2:].isnull().any().any()
+    return not df[cols].iloc[-rows:].isnull().any().any()

@@ -137,7 +137,7 @@ function renderSignal(x) {
       </div>
       <div class="grid">
         <div>Entrada <b>${fmt(x.entry)}</b></div><div>Stop ${fmt(x.stop)}</div>
-        <div>Tamaño ${x.size_base} ${x.base || ''}</div><div>Margen ${fmt(x.margin_usdt)} USDT</div>
+        <div>Tamaño ${fmt(x.size_base)} ${x.base || ''}</div><div>Margen ${fmt(x.margin_usdt)} USDT</div>
         <div>1R ${fmt(x.risk_points)}</div><div>TP ${x.tps.map(fmt).join(' / ')}</div>
       </div>
     </div>`;
@@ -145,7 +145,11 @@ function renderSignal(x) {
 
 function fmt(n) {
   if (n === null || n === undefined) return '—';
-  return Number(n).toLocaleString('es-ES', { maximumFractionDigits: 2 });
+  const x = Number(n);
+  const ax = Math.abs(x);
+  // Decimales según magnitud: con 2 fijos, DOGE/ADA/TRX salían como 0.
+  const d = ax >= 100 ? 2 : ax >= 1 ? 4 : ax >= 0.01 ? 6 : 8;
+  return x.toLocaleString('es-ES', { maximumFractionDigits: d });
 }
 
 boot();

@@ -22,7 +22,7 @@ from flask import Flask, jsonify, request, send_from_directory
 
 from config import Config
 import main as engine
-from notify import base_asset
+from notify import base_asset, fmt_px, round_px
 from webpush import PushManager
 from store import SignalStore
 
@@ -55,26 +55,27 @@ def _signal_record(cfg, symbol, sig, plan) -> dict:
         "base": base_asset(symbol),
         "timeframe": cfg.TIMEFRAME,
         "direction": sig.direction,
-        "entry": round(plan.entry, 2),
-        "stop": round(plan.stop, 2),
-        "risk_points": round(plan.risk_points, 2),
+        # round_px usa decimales según magnitud (DOGE/ADA con 2 fijos salían 0.00).
+        "entry": round_px(plan.entry),
+        "stop": round_px(plan.stop),
+        "risk_points": round_px(plan.risk_points),
         "size_base": round(plan.size_base, 6),
         "notional_usdt": round(plan.notional_usdt, 2),
         "margin_usdt": round(plan.margin_usdt, 2),
         "leverage": plan.leverage,
         "risk_usdt": plan.risk_usdt,
-        "tps": [round(t, 2) for t in plan.tps],
-        "resistance": round(sig.resistance, 2),
-        "support": round(sig.support, 2),
+        "tps": [round_px(t) for t in plan.tps],
+        "resistance": round_px(sig.resistance),
+        "support": round_px(sig.support),
         "rsi": [round(sig.rsi_prev, 1), round(sig.rsi_curr, 1)],
-        "hist": [round(sig.hist_prev, 2), round(sig.hist_curr, 2)],
+        "hist": [round_px(sig.hist_prev), round_px(sig.hist_curr)],
     }
 
 
 def _push_payload(rec: dict) -> dict:
     icon = "📈" if rec["direction"] == "long" else "📉"
-    body = (f"Entrada {rec['entry']:,.2f} · Stop {rec['stop']:,.2f} · "
-            f"{rec['size_base']:.6f} {rec['base']} · TP1 {rec['tps'][0]:,.2f}")
+    body = (f"Entrada {fmt_px(rec['entry'])} · Stop {fmt_px(rec['stop'])} · "
+            f"{fmt_px(rec['size_base'])} {rec['base']} · TP1 {fmt_px(rec['tps'][0])}")
     return {
         "title": f"{icon} SEÑAL {rec['direction'].upper()} — {rec['symbol']} ({rec['timeframe']})",
         "body": body,
@@ -91,9 +92,9 @@ def on_eval(cfg, symbol, candle_ts, close, levels, ev) -> None:
         "symbol": symbol,
         "base": base_asset(symbol),
         "timeframe": cfg.TIMEFRAME,
-        "close": round(close, 2),
-        "resistance": round(levels.resistance, 2),
-        "support": round(levels.support, 2),
+        "close": round_px(close),
+        "resistance": round_px(levels.resistance),
+        "support": round_px(levels.support),
         "long": {"rsi": ev.long.conditions.rsi, "macd": ev.long.conditions.macd,
                  "price": ev.long.conditions.price},
         "short": {"rsi": ev.short.conditions.rsi, "macd": ev.short.conditions.macd,

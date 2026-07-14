@@ -58,6 +58,14 @@ class Config:
     # por eso viene APAGADO por defecto.
     MACD_REQUIRE_ABOVE_SIGNAL = _b("MACD_REQUIRE_ABOVE_SIGNAL", False)
 
+    # ── Ventana de confluencia ─────────────────────────────────
+    # La ruptura de nivel debe ser en la vela actual, pero los cruces de RSI y
+    # MACD valen si ocurrieron en cualquiera de las últimas N velas (incluida la
+    # actual). Con 1 se exige todo en la MISMA vela — backtest de 4 meses sobre
+    # los 10 pares por defecto: con 1 disparó 0 veces (los tres eventos casi
+    # nunca coinciden en la misma vela); con 5, ~20 señales (≈1/semana).
+    CONFLUENCE_WINDOW = _i("CONFLUENCE_WINDOW", 5)
+
     # ── Niveles soporte/resistencia (swing high/low) ───────────
     SWING_N       = _i("SWING_N", 20)                     # ventana de velas del swing
 

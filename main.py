@@ -38,7 +38,7 @@ from indicators import add_indicators, has_warmup
 from levels import swing_levels, Levels
 from rules import evaluate, Signal, Evaluation
 from sizing import build_plan
-from notify import Notifier, format_signal
+from notify import Notifier, format_signal, fmt_px
 
 log = logging.getLogger("signal-watcher")
 
@@ -81,7 +81,8 @@ def run_once(cfg, symbol: str, state: dict,
     df = kdata.fetch_klines(symbol, cfg.TIMEFRAME, cfg.KLINES_LIMIT, cfg.BASE_URL)
     df = kdata.drop_unclosed(df, cfg.TIMEFRAME)
 
-    min_rows = max(cfg.SWING_N, cfg.MACD_SLOW + cfg.MACD_SIGNAL, cfg.RSI_PERIOD) + 2
+    min_rows = (max(cfg.SWING_N, cfg.MACD_SLOW + cfg.MACD_SIGNAL, cfg.RSI_PERIOD)
+                + 1 + cfg.CONFLUENCE_WINDOW)
     if len(df) < min_rows:
         log.warning("[%s] Pocas velas cerradas (%d < %d); espero al siguiente ciclo",
                     symbol, len(df), min_rows)
@@ -92,7 +93,7 @@ def run_once(cfg, symbol: str, state: dict,
         return False   # esta vela ya se procesó (nada nuevo)
 
     df = add_indicators(df, cfg)
-    if not has_warmup(df):
+    if not has_warmup(df, rows=cfg.CONFLUENCE_WINDOW + 1):
         log.warning("[%s] Indicadores con NaN en las últimas velas; espero más historia", symbol)
         return False
 
@@ -104,9 +105,9 @@ def run_once(cfg, symbol: str, state: dict,
     fired = ev.fired
     verdict = f"→ FIRED {fired.direction.upper()}" if fired else "→ sin señal"
     log.info(
-        "[%s UTC] %s %s close=%.2f | res=%.2f sop=%.2f | LONG %s | SHORT %s %s",
-        when, symbol, cfg.TIMEFRAME, close,
-        levels.resistance, levels.support,
+        "[%s UTC] %s %s close=%s | res=%s sop=%s | LONG %s | SHORT %s %s",
+        when, symbol, cfg.TIMEFRAME, fmt_px(close),
+        fmt_px(levels.resistance), fmt_px(levels.support),
         ev.long.conditions.as_marks(), ev.short.conditions.as_marks(), verdict,
     )
 
@@ -129,9 +130,9 @@ def run_once(cfg, symbol: str, state: dict,
                       symbol, fired.direction, e)
             plan = None
         if plan is not None:
-            log.info("SEÑAL %s %s — entrada=%.2f stop=%.2f size=%.6f margen=%.2f USDT",
-                     symbol, fired.direction.upper(), plan.entry, plan.stop,
-                     plan.size_base, plan.margin_usdt)
+            log.info("SEÑAL %s %s — entrada=%s stop=%s size=%s margen=%.2f USDT",
+                     symbol, fired.direction.upper(), fmt_px(plan.entry),
+                     fmt_px(plan.stop), fmt_px(plan.size_base), plan.margin_usdt)
             if on_signal:
                 try:
                     on_signal(cfg, symbol, fired, plan)
