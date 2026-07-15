@@ -7,10 +7,18 @@ evaluando y devolviendo como INFORMATIVA (log/panel), pero desde 2026-07 NO
 se exige para disparar.
 
 Ventana de confluencia (cfg.CONFLUENCE_WINDOW, W):
-  Los CRUCES de RSI y MACD valen si ocurrieron en cualquiera de las últimas W
-  velas (incluida la actual). Con W=1 se recupera la regla estricta "todo en
-  la misma vela" — que en un backtest de 4 meses sobre los 10 pares por
-  defecto disparó 0 veces: los eventos son puntuales y casi nunca coinciden.
+  Con W=1 (defecto desde 2026-07-15) los cruces de RSI y MACD deben ocurrir en
+  la MISMA vela cerrada: regla estricta, pocas señales pero sin desfase entre
+  el cruce y el aviso. Con W>1 los cruces valen si ocurrieron en cualquiera de
+  las últimas W velas (incluida la actual).
+
+Flanco de subida (anti-duplicados, 2026-07-15):
+  `triggered` solo es True en la PRIMERA vela donde la confluencia se completa.
+  Si la confluencia ya se cumplía evaluada sobre la vela anterior, la señal se
+  suprime: sin esto, unos cruces que siguen "dentro de las últimas W velas"
+  re-disparaban el mismo evento hasta W velas seguidas (una notificación por
+  vela, cada vez más lejos del cruce). Las condiciones se siguen devolviendo
+  en crudo para log/panel; solo cambia `triggered`.
 
 Diseño para ampliar (p.ej. divergencias RSI como 4ª condición):
   - `Conditions.divergence` ya existe como campo opcional (None = no evaluada).
@@ -66,7 +74,7 @@ class Conditions:
 @dataclass
 class Signal:
     direction: str            # "long" | "short"
-    triggered: bool           # RSI + MACD (y divergencia si se evalúa) verdad
+    triggered: bool           # confluencia RSI + MACD recién completada (flanco de subida)
     price: float              # cierre de la vela que dispara
     candle_ts: int            # open_time (ms) de esa vela
     conditions: Conditions
@@ -108,50 +116,55 @@ def _crossed_within(series: pd.Series, level: float, window: int, up: bool) -> b
     return bool(crossed.iloc[1:].any())
 
 
-def eval_long(df: pd.DataFrame, levels: Levels, cfg) -> Signal:
+def _confluence(df: pd.DataFrame, cfg, up: bool) -> bool:
+    """RSI + MACD de la confluencia, evaluados sobre la ÚLTIMA vela de `df`.
+    Se usa también sobre df[:-1] para detectar el flanco de subida."""
+    level = cfg.RSI_LONG_LEVEL if up else cfg.RSI_SHORT_LEVEL
+    w = cfg.CONFLUENCE_WINDOW
+    c_rsi = _crossed_within(df["rsi"], level, w, up=up)
+    c_macd = _crossed_within(df["macd_hist"], 0.0, w, up=up)
+    if cfg.MACD_REQUIRE_ABOVE_SIGNAL:
+        macd_curr = float(df["macd"].iloc[-1])
+        sig_curr = float(df["macd_signal"].iloc[-1])
+        c_macd = c_macd and (macd_curr > sig_curr if up else macd_curr < sig_curr)
+    return c_rsi and c_macd
+
+
+def _eval_side(df: pd.DataFrame, levels: Levels, cfg, up: bool) -> Signal:
     rsi_prev, rsi_curr   = float(df["rsi"].iloc[-2]),  float(df["rsi"].iloc[-1])
     hist_prev, hist_curr = float(df["macd_hist"].iloc[-2]), float(df["macd_hist"].iloc[-1])
     macd_curr, sig_curr  = float(df["macd"].iloc[-1]), float(df["macd_signal"].iloc[-1])
     close = float(df["close"].iloc[-1])
     w = cfg.CONFLUENCE_WINDOW
 
-    c_rsi = _crossed_within(df["rsi"], cfg.RSI_LONG_LEVEL, w, up=True)
-    c_macd = _crossed_within(df["macd_hist"], 0.0, w, up=True)
+    level = cfg.RSI_LONG_LEVEL if up else cfg.RSI_SHORT_LEVEL
+    c_rsi = _crossed_within(df["rsi"], level, w, up=up)
+    c_macd = _crossed_within(df["macd_hist"], 0.0, w, up=up)
     if cfg.MACD_REQUIRE_ABOVE_SIGNAL:
-        c_macd = c_macd and (macd_curr > sig_curr)
-    c_price = close > levels.resistance
+        c_macd = c_macd and (macd_curr > sig_curr if up else macd_curr < sig_curr)
+    c_price = close > levels.resistance if up else close < levels.support
 
     conds = Conditions(rsi=c_rsi, macd=c_macd, price=c_price)
+    # Flanco de subida: si la confluencia ya se cumplía en la vela anterior,
+    # este disparo es una repetición del mismo evento y se suprime.
+    already_firing = _confluence(df.iloc[:-1], cfg, up=up)
     return Signal(
-        direction="long", triggered=conds.all_pass, price=close,
+        direction="long" if up else "short",
+        triggered=conds.all_pass and not already_firing,
+        price=close,
         candle_ts=int(df["open_time"].iloc[-1]), conditions=conds,
         resistance=levels.resistance, support=levels.support,
         rsi_prev=rsi_prev, rsi_curr=rsi_curr,
         hist_prev=hist_prev, hist_curr=hist_curr,
     )
+
+
+def eval_long(df: pd.DataFrame, levels: Levels, cfg) -> Signal:
+    return _eval_side(df, levels, cfg, up=True)
 
 
 def eval_short(df: pd.DataFrame, levels: Levels, cfg) -> Signal:
-    rsi_prev, rsi_curr   = float(df["rsi"].iloc[-2]),  float(df["rsi"].iloc[-1])
-    hist_prev, hist_curr = float(df["macd_hist"].iloc[-2]), float(df["macd_hist"].iloc[-1])
-    macd_curr, sig_curr  = float(df["macd"].iloc[-1]), float(df["macd_signal"].iloc[-1])
-    close = float(df["close"].iloc[-1])
-    w = cfg.CONFLUENCE_WINDOW
-
-    c_rsi = _crossed_within(df["rsi"], cfg.RSI_SHORT_LEVEL, w, up=False)
-    c_macd = _crossed_within(df["macd_hist"], 0.0, w, up=False)
-    if cfg.MACD_REQUIRE_ABOVE_SIGNAL:
-        c_macd = c_macd and (macd_curr < sig_curr)
-    c_price = close < levels.support
-
-    conds = Conditions(rsi=c_rsi, macd=c_macd, price=c_price)
-    return Signal(
-        direction="short", triggered=conds.all_pass, price=close,
-        candle_ts=int(df["open_time"].iloc[-1]), conditions=conds,
-        resistance=levels.resistance, support=levels.support,
-        rsi_prev=rsi_prev, rsi_curr=rsi_curr,
-        hist_prev=hist_prev, hist_curr=hist_curr,
-    )
+    return _eval_side(df, levels, cfg, up=False)
 
 
 def evaluate(df: pd.DataFrame, levels: Levels, cfg) -> Evaluation:
