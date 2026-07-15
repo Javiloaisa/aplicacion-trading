@@ -21,7 +21,8 @@ async function boot() {
     CONFIG = await (await fetch('/api/config')).json();
     $('app-name').textContent = CONFIG.appName || 'Signal Watcher';
     const syms = CONFIG.symbols || [];
-    $('pair').textContent = `${syms.length} cripto · ${CONFIG.timeframe}`;
+    const tfs = CONFIG.timeframes || [];
+    $('pair').textContent = `${syms.length} cripto · ${tfs.join(' + ')}`;
   } catch (e) { /* seguimos: el panel puede fallar sin romper la UI */ }
 
   if (!('serviceWorker' in navigator) || !('PushManager' in window)) {
@@ -95,10 +96,14 @@ async function refreshStatus() {
   try { s = await (await fetch('/api/status')).json(); } catch (e) { return; }
   $('live-dot').classList.add('on');
 
-  // Última evaluación POR SÍMBOLO (dict {symbol: eval})
+  // Última evaluación por SÍMBOLO × TIMEFRAME (dict {"SYM@tf": eval})
   const evals = s.last_eval || {};
-  const order = (CONFIG && CONFIG.symbols) || Object.keys(evals);
-  const rows = order.filter((sym) => evals[sym]).map((sym) => renderEval(evals[sym]));
+  const syms = (CONFIG && CONFIG.symbols) || [];
+  const tfs = (CONFIG && CONFIG.timeframes) || [];
+  let keys = [];
+  for (const sym of syms) for (const tf of tfs) keys.push(`${sym}@${tf}`);
+  if (!keys.length) keys = Object.keys(evals);
+  const rows = keys.filter((k) => evals[k]).map((k) => renderEval(evals[k]));
   if (rows.length) {
     $('eval').innerHTML = rows.join('');
   }
@@ -115,7 +120,7 @@ function renderEval(ev) {
   return `
     <div class="sig">
       <div class="top">
-        <span><b>${asset}</b></span>
+        <span><b>${asset}</b> <span class="tf">${ev.timeframe}</span></span>
         ${ev.fired ? `<span class="dir ${ev.fired}">${ev.fired.toUpperCase()}</span>` : ''}
         <span class="when">${fmt(ev.close)}</span>
       </div>
