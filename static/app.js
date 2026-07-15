@@ -125,8 +125,8 @@ function renderEval(ev) {
         <span class="when">${fmt(ev.close)}</span>
       </div>
       <div class="conds">
-        <span class="cond"><b>L</b> RSI ${mark(ev.long.rsi)} MACD ${mark(ev.long.macd)} Px ${mark(ev.long.price)}</span>
-        <span class="cond"><b>S</b> RSI ${mark(ev.short.rsi)} MACD ${mark(ev.short.macd)} Px ${mark(ev.short.price)}</span>
+        <span class="cond"><b>L</b> RSI ${mark(ev.long.rsi)} MACD ${mark(ev.long.macd)}</span>
+        <span class="cond"><b>S</b> RSI ${mark(ev.short.rsi)} MACD ${mark(ev.short.macd)}</span>
       </div>
     </div>`;
 }

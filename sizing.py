@@ -50,9 +50,11 @@ def build_plan(sig: Signal, *, risk_usdt: float, leverage: int,
         stop = level * (1 + stop_buffer_pct)
         sign = -1
 
-    risk_points = abs(entry - stop)
+    # Sin la condición de ruptura, la entrada puede quedar (raramente) al lado
+    # malo del stop: se comprueba con signo, no con abs(), para detectarlo.
+    risk_points = (entry - stop) if sig.direction == "long" else (stop - entry)
     if risk_points <= 0:
-        raise ValueError(f"risk_points no positivo (entry={entry}, stop={stop})")
+        raise ValueError(f"stop al lado equivocado (entry={entry}, stop={stop})")
 
     size_base = risk_usdt / risk_points
     notional = size_base * entry

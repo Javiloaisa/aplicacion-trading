@@ -2,10 +2,11 @@
 
 Servicio de **aviso** (no de ejecución) que vigila **las 10 cripto más fuertes en
 Bitunix** (BTC, ETH, BNB, SOL, XRP, DOGE, ADA, TRX, AVAX, LINK — configurable),
-evalúa en cada una una regla de **confluencia de 3 condiciones** (RSI + MACD +
-nivel de precio) sobre **velas cerradas**, y avisa por **Web Push a una PWA
-instalable en el móvil** cuando se cumplen las 3 a la vez, incluyendo tamaño de
-posición y niveles R.
+evalúa en cada una una regla de **confluencia RSI + MACD** sobre **velas
+cerradas** (en **1h y 4h** a la vez), y avisa por **Web Push a una PWA
+instalable en el móvil** cuando se cumplen las dos, incluyendo tamaño de
+posición y niveles R. La ruptura de nivel de precio se muestra como dato
+informativo pero **no se exige** para disparar.
 
 > **No pone órdenes. Solo detecta y notifica.**
 > **Los avisos van SOLO al móvil (Web Push). No usa Telegram.**
@@ -16,31 +17,28 @@ niveles y estado anti-repintado propios por par.
 
 ---
 
-## La regla (confluencia de 3 condiciones sobre velas cerradas)
+## La regla (confluencia RSI + MACD sobre velas cerradas)
 
-La **ruptura de nivel** debe ocurrir en la **vela actual**; los **cruces** de RSI y
-MACD valen si ocurrieron en cualquiera de las últimas `CONFLUENCE_WINDOW` velas
-(por defecto **5**, incluida la actual).
+Los **cruces** de RSI y MACD valen si ocurrieron en cualquiera de las últimas
+`CONFLUENCE_WINDOW` velas (por defecto **5**, incluida la actual).
 
 **LONG**
 1. **RSI** cruzó al alza el nivel 30 en las últimas W velas.
 2. **MACD** histograma cruzó de negativo a positivo en las últimas W velas
    (opcional: línea MACD > señal en la vela actual, `MACD_REQUIRE_ABOVE_SIGNAL=true`).
-3. **Precio** cierra por encima de la **resistencia** swing (vela actual).
 
 **SHORT** (simétrica)
 1. **RSI** cruzó a la baja el 70 en las últimas W velas.
 2. **MACD** histograma cruzó de positivo a negativo en las últimas W velas.
-3. **Precio** cierra por debajo del **soporte** swing (vela actual).
 
-Regla dura: **una o dos condiciones no es señal.** El estado de las 3 se loguea en
-cada vela aunque no dispare, para poder depurar.
+Regla dura: **una condición sola no es señal.** El estado (incluida la ruptura
+de nivel, ya solo informativa) se loguea en cada vela aunque no dispare.
 
 > ¿Por qué la ventana? Con `CONFLUENCE_WINDOW=1` (todo en la MISMA vela), un
-> backtest de 4 meses en 1h sobre los 10 pares por defecto dio **0 señales**: los
-> tres eventos son puntuales y casi nunca coinciden en la misma vela (el RSI no
-> puede estar saliendo de sobreventa justo cuando el precio marca un máximo de 20
-> velas). Con **5** salieron ~20 señales (≈1/semana entre los 10 pares).
+> backtest de 4 meses en 1h sobre los 10 pares por defecto dio **0 señales**:
+> los eventos son puntuales y casi nunca coinciden en la misma vela. Con **5**
+> salieron ~20 señales (≈1/semana entre los 10 pares), aún exigiendo también la
+> ruptura de nivel; sin exigirla habrá bastantes más.
 
 ### Niveles (v1, simple a propósito)
 Swing high/low de las últimas `N` velas, excluyendo la vela que dispara:

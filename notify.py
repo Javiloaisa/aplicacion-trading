@@ -108,9 +108,9 @@ def format_signal(symbol: str, timeframe: str, sig: Signal, plan: RiskPlan, cfg)
         f"TP3 (3R): {_fmt_px(tp3)}",
         f"⏫ Break-even: sube el stop a {_fmt_px(plan.breakeven)} al llegar a +1R",
         "",
-        "<b>Condiciones (3/3):</b>",
+        "<b>Condiciones (2/2):</b>",
         f"✅ {rsi_line}",
         f"✅ {macd_line}",
-        f"✅ {price_line}",
+        f"{'✅' if sig.conditions.price else 'ℹ️ (no exigido)'} {price_line}",
     ]
     return "\n".join(lines)

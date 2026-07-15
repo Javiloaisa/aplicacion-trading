@@ -1,16 +1,16 @@
 """
-Regla de confluencia de 3 condiciones evaluada sobre la ÚLTIMA VELA CERRADA.
+Regla de confluencia RSI + MACD evaluada sobre la ÚLTIMA VELA CERRADA.
 
-Regla dura: solo hay señal si las 3 condiciones son verdad. Una o dos NO es
-señal. El estado de las 3 se devuelve siempre (aunque no dispare) para poder
-loguearlo y depurar.
+Regla dura: solo hay señal si RSI y MACD son verdad. Uno solo NO es señal.
+La condición de precio (ruptura de soporte/resistencia swing) se sigue
+evaluando y devolviendo como INFORMATIVA (log/panel), pero desde 2026-07 NO
+se exige para disparar.
 
 Ventana de confluencia (cfg.CONFLUENCE_WINDOW, W):
-  La RUPTURA de nivel debe ser en la vela actual; los CRUCES de RSI y MACD
-  valen si ocurrieron en cualquiera de las últimas W velas (incluida la actual).
-  Con W=1 se recupera la regla estricta "todo en la misma vela" — que en un
-  backtest de 4 meses sobre los 10 pares por defecto disparó 0 veces: los tres
-  eventos son puntuales y casi nunca caen en la misma vela.
+  Los CRUCES de RSI y MACD valen si ocurrieron en cualquiera de las últimas W
+  velas (incluida la actual). Con W=1 se recupera la regla estricta "todo en
+  la misma vela" — que en un backtest de 4 meses sobre los 10 pares por
+  defecto disparó 0 veces: los eventos son puntuales y casi nunca coinciden.
 
 Diseño para ampliar (p.ej. divergencias RSI como 4ª condición):
   - `Conditions.divergence` ya existe como campo opcional (None = no evaluada).
@@ -21,13 +21,13 @@ LONG:
   1. RSI cruzó al alza el nivel en las últimas W velas: rsi[i] > L y rsi[i-1] <= L
   2. MACD hist cruzó de negativo a positivo en las últimas W velas
      (opcional) línea MACD > señal en la vela actual
-  3. Precio: cierre actual > resistencia swing
+  (info) Precio: cierre actual > resistencia swing
 
 SHORT (simétrica):
   1. RSI cruzó a la baja el nivel en las últimas W velas
   2. MACD hist cruzó de positivo a negativo en las últimas W velas
      (opcional) línea MACD < señal en la vela actual
-  3. Precio: cierre actual < soporte swing
+  (info) Precio: cierre actual < soporte swing
 """
 
 from dataclasses import dataclass
@@ -46,7 +46,10 @@ class Conditions:
 
     @property
     def all_pass(self) -> bool:
-        base = self.rsi and self.macd and self.price
+        # La condición de precio (ruptura de nivel) es solo INFORMATIVA desde
+        # 2026-07: la señal dispara con RSI + MACD. `price` se sigue evaluando
+        # y devolviendo para log/panel, pero no bloquea el aviso.
+        base = self.rsi and self.macd
         if self.divergence is None:
             return base
         return base and self.divergence
@@ -63,7 +66,7 @@ class Conditions:
 @dataclass
 class Signal:
     direction: str            # "long" | "short"
-    triggered: bool           # las 3 (o 4) condiciones verdad en la misma vela
+    triggered: bool           # RSI + MACD (y divergencia si se evalúa) verdad
     price: float              # cierre de la vela que dispara
     candle_ts: int            # open_time (ms) de esa vela
     conditions: Conditions
@@ -83,8 +86,9 @@ class Evaluation:
 
     @property
     def fired(self) -> Signal | None:
-        """La señal que disparó (o None). Long y short son mutuamente excluyentes:
-        el cierre no puede estar a la vez sobre la resistencia y bajo el soporte."""
+        """La señal que disparó (o None). En la práctica long y short no coinciden
+        (RSI tendría que cruzar ↑30 y ↓70 dentro de la misma ventana W); si alguna
+        vez pasara, long tiene prioridad."""
         if self.long.triggered:
             return self.long
         if self.short.triggered:
