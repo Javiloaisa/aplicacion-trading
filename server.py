@@ -22,7 +22,7 @@ from flask import Flask, jsonify, request, send_from_directory
 
 from config import Config
 import main as engine
-from notify import base_asset, fmt_px, round_px
+from notify import base_asset, candle_close_utc, fmt_px, round_px
 from webpush import PushManager
 from store import SignalStore
 
@@ -50,7 +50,7 @@ def _iso(ts_ms: int) -> str:
 def _signal_record(cfg, symbol, timeframe, sig, plan) -> dict:
     return {
         "ts": sig.candle_ts,
-        "time_utc": _iso(sig.candle_ts),
+        "time_utc": candle_close_utc(sig.candle_ts, timeframe),   # hora de cierre = hora del aviso
         "symbol": symbol,
         "base": base_asset(symbol),
         "timeframe": timeframe,
