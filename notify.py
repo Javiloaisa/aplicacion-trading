@@ -4,9 +4,11 @@ crypto-agent: HTTP directo con urllib + parse_mode HTML, sin dependencias extra.
 """
 
 import json
+import urllib.error
 import urllib.request
 from datetime import datetime, timezone
 
+from data import interval_to_ms
 from rules import Signal
 from sizing import RiskPlan
 
@@ -33,6 +35,11 @@ class Notifier:
             )
             urllib.request.urlopen(req, timeout=10)
             return True
+        except urllib.error.HTTPError as e:
+            # Telegram explica el rechazo en el cuerpo (p.ej. "can't parse entities").
+            detail = e.read().decode("utf-8", "replace")
+            print(f"  [notify] Telegram rechazó el mensaje ({e.code}): {detail}")
+            return False
         except Exception as e:  # noqa: BLE001
             print(f"  [notify] Telegram error: {e}")
             return False
@@ -73,22 +80,40 @@ def base_asset(symbol: str) -> str:
     return symbol
 
 
+def candle_close_utc(candle_ts: int, timeframe: str) -> str:
+    """Hora de CIERRE de la vela (open_time + intervalo), que es cuando salta el
+    aviso. candle_ts es el open_time: mostrarlo como "vela cerrada" atrasaba la
+    hora 1h (o 4h) respecto al momento real de la señal."""
+    close_ms = candle_ts + interval_to_ms(timeframe)
+    return datetime.fromtimestamp(close_ms / 1000, timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+
+
 def format_signal(symbol: str, timeframe: str, sig: Signal, plan: RiskPlan, cfg) -> str:
     icon = "📈" if sig.direction == "long" else "📉"
     asset = base_asset(symbol)
-    when = datetime.fromtimestamp(sig.candle_ts / 1000, timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+    when = candle_close_utc(sig.candle_ts, timeframe)
 
+    # El mensaje va con parse_mode HTML: los "<" y ">" de texto van escapados
+    # (&lt; / &gt;); un "<" suelto hace que Telegram rechace el mensaje entero.
     if sig.direction == "long":
         rsi_line = f"RSI cruce ↑ {cfg.RSI_LONG_LEVEL:g}   ({sig.rsi_prev:.1f} → {sig.rsi_curr:.1f})"
         macd_line = (f"MACD hist −→+   ({fmt_px(sig.hist_prev, signed=True)} → "
                      f"{fmt_px(sig.hist_curr, signed=True)})")
-        price_line = f"Cierre > resistencia {_fmt_px(sig.resistance)}"
+        if sig.conditions.price:
+            price_line = f"✅ Ruptura: cierre &gt; resistencia {_fmt_px(sig.resistance)}"
+        else:
+            price_line = (f"ℹ️ Sin ruptura (no exigida): cierre {_fmt_px(sig.price)} "
+                          f"≤ resistencia {_fmt_px(sig.resistance)}")
         stop_note = f"bajo soporte swing {_fmt_px(plan.level_broken)}, buffer {cfg.STOP_BUFFER_PCT*100:g}%"
     else:
         rsi_line = f"RSI cruce ↓ {cfg.RSI_SHORT_LEVEL:g}   ({sig.rsi_prev:.1f} → {sig.rsi_curr:.1f})"
         macd_line = (f"MACD hist +→−   ({fmt_px(sig.hist_prev, signed=True)} → "
                      f"{fmt_px(sig.hist_curr, signed=True)})")
-        price_line = f"Cierre < soporte {_fmt_px(sig.support)}"
+        if sig.conditions.price:
+            price_line = f"✅ Ruptura: cierre &lt; soporte {_fmt_px(sig.support)}"
+        else:
+            price_line = (f"ℹ️ Sin ruptura (no exigida): cierre {_fmt_px(sig.price)} "
+                          f"≥ soporte {_fmt_px(sig.support)}")
         stop_note = f"sobre resistencia swing {_fmt_px(plan.level_broken)}, buffer {cfg.STOP_BUFFER_PCT*100:g}%"
 
     tp1, tp2, tp3 = plan.tps
@@ -111,6 +136,6 @@ def format_signal(symbol: str, timeframe: str, sig: Signal, plan: RiskPlan, cfg)
         "<b>Condiciones (2/2):</b>",
         f"✅ {rsi_line}",
         f"✅ {macd_line}",
-        f"{'✅' if sig.conditions.price else 'ℹ️ (no exigido)'} {price_line}",
+        price_line,
     ]
     return "\n".join(lines)
